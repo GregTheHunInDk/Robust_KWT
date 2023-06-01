@@ -1,0 +1,11 @@
+audiomentations
+einops
+librosa
+matplotlib
+numpy
+torch
+torchaudio
+torchvision
+tqdm
+transformers
+wandb
