@@ -35,7 +35,11 @@ The adversarial pretraining is similar, but it requires two config files (the va
 python3.8 adv_pretrain.py --confk adv_configs/petrain/KWT/<name_of_the_config_file>.yaml --confd adv_configs/petrain/data2vec/<name_of_the_config_file>.yaml --k <number_of_shared_layers>
 ```
 # Noisy data generation
-The noisy dataset generator codes can be found in the noise_gen folder. 
+The Python scripts use FaNT to add noise to the data. FaNT can be cloned from https://github.com/i3thuan5/FaNT
+FaNT must be installed in the noise_gen folder as "noise_gen/FaNT" to make the scripts work. 
+Various shell scripts can be found in the folders that can be used to generate noise in various SNR levels. 
+
+The noisy dataset generator codes can be also found in the noise_gen folder. 
 To run test data with custom noise, the following must be run: 
 ``` shell
 python3.8 noise_gen.py --dp <path_to_the_test_data> --np <path_to_the_noise.wav> --snr <signal_to_noise_ratio_in_dB>
@@ -46,4 +50,5 @@ In order to generate noisy training data for adversarial training the following 
 python3.8 mixed_train_adv.py --snr <snr> 
 ```
 The noise is saved in the following path: /home/ubuntu/noisy_speech_commands_v0.02/seeded/adv/
+
 
