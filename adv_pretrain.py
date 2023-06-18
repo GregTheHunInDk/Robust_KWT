@@ -61,14 +61,30 @@ def adv_pretrain(config_kwt, config_d2v, k, alpha):
     ######################################
     
     # training
+    # adversarial
+    print("Loading adversarial training dataset...")
     with open(config_kwt["train_list_file"], "r") as f:
-        train_list = f.read().rstrip().split("\n")
-    trainloader = get_noisy_loader(train_list, config_kwt, train=True)
+        train_lista = f.read().rstrip().split("\n")
+    trainloadera = get_noisy_loader(train_lista, config_kwt, train=True)
+    
+    # friendly
+    print("Loading friendly training dataset...")
+    with open(config_d2v["train_list_file"], "r") as f:
+        train_listf = f.read().rstrip().split("\n")
+    trainloaderf = get_loader(train_listf, config_d2v, train=True)
     
     # validation
+    # adversarial
+    print("Loading adversarial validation dataset...")
     with open(config_kwt["val_list_file"], "r") as f:
-        val_list = f.read().rstrip().split("\n")
-    valloader = get_noisy_loader(val_list, config_kwt, train=False)
+        val_lista = f.read().rstrip().split("\n")
+    valloadera = get_noisy_loader(val_lista, config_kwt, train=False)
+    
+    #friendly
+    print("Loading friendly validation dataset...")
+    with open(config_d2v["val_list_file"], "r") as f:
+        val_listf = f.read().rstrip().split("\n")
+    valloaderf = get_loader(val_listf, config_d2v, train=False)
     
     mask_generator = AudioMaskingGenerator(mask_prob=config_d2v["hparams"]["model"]["mask_prob"],
                                            mask_length=config_d2v["hparams"]["model"]["mask_length"],
@@ -120,7 +136,7 @@ def adv_pretrain(config_kwt, config_d2v, k, alpha):
     
     # Learning rate scheduler for data2vec
     epochs = config_d2v["hparams"]["n_epochs"]
-    steps_per_epoch = len(trainloader)
+    steps_per_epoch = len(trainloaderf)
     lr_scheduler = optim.lr_scheduler.OneCycleLR(
         optimizer_d2v,
         max_lr=config_d2v["hparams"]["optimizer"]["opt_kwargs"]["lr"],
@@ -138,17 +154,17 @@ def adv_pretrain(config_kwt, config_d2v, k, alpha):
     
     # Setting up the learning rate scheduler for data2vec and KWT
     if config_d2v["hparams"]["scheduler"]["n_warmup"]:
-        schedulers_d2v["warmup"] = WarmUpLR(optimizer_kwt, total_iters=len(trainloader) * config_d2v["hparams"]["scheduler"]["n_warmup"])
+        schedulers_d2v["warmup"] = WarmUpLR(optimizer_kwt, total_iters=len(trainloaderf) * config_d2v["hparams"]["scheduler"]["n_warmup"])
         
     if config_d2v["hparams"]["scheduler"]["scheduler_type"] is not None: 
-        total_iters = len(trainloader) * max(1, (config_d2v["hparams"]["scheduler"]["max_epochs"] - config_d2v["hparams"]["scheduler"]["n_warmup"]))
+        total_iters = len(trainloaderf) * max(1, (config_d2v["hparams"]["scheduler"]["max_epochs"] - config_d2v["hparams"]["scheduler"]["n_warmup"]))
         schedulers_d2v["scheduler"] = get_scheduler(optimizer_kwt, config_d2v["hparams"]["scheduler"]["scheduler_type"], total_iters)
         
     if config_kwt["hparams"]["scheduler"]["n_warmup"]:
-        schedulers_kwt["warmup"] = WarmUpLR(optimizer_kwt, total_iters=len(trainloader) * config_kwt["hparams"]["scheduler"]["n_warmup"])
+        schedulers_kwt["warmup"] = WarmUpLR(optimizer_kwt, total_iters=len(trainloadera) * config_kwt["hparams"]["scheduler"]["n_warmup"])
 
     if config_kwt["hparams"]["scheduler"]["scheduler_type"] is not None:
-        total_iters = len(trainloader) * max(1, (config_kwt["hparams"]["scheduler"]["max_epochs"] - config_kwt["hparams"]["scheduler"]["n_warmup"]))
+        total_iters = len(trainloadera) * max(1, (config_kwt["hparams"]["scheduler"]["max_epochs"] - config_kwt["hparams"]["scheduler"]["n_warmup"]))
         schedulers_kwt["scheduler"] = get_scheduler(optimizer_kwt, config_kwt["hparams"]["scheduler"]["scheduler_type"], total_iters)
     
     
@@ -168,7 +184,7 @@ def adv_pretrain(config_kwt, config_d2v, k, alpha):
     device = config_d2v["hparams"]["device"]
     log_file = os.path.join(config_d2v["exp"]["exp_dir"], "training_log.txt")
     best_avg_loss = 0.0
-    n_batches = len(trainloader)
+    n_batches = len(trainloaderf)
     
     for epoch in range(config_d2v["hparams"]["n_epochs"]):
         t0 = time.time()
@@ -178,9 +194,9 @@ def adv_pretrain(config_kwt, config_d2v, k, alpha):
         running_loss_kwt = 0.0
         correct_kwt = 0
         
-        for batch_index, (data, targets) in enumerate(trainloader):
-            batch_size = data.size(dim=0)
-            audio_length = data.size(dim=-1)
+        for (dataf, targetsf), (dataa, targetsa) in zip(trainloaderf, trainloadera):
+            batch_size = dataf.size(dim=0)
+            audio_length = dataf.size(dim=-1)
             
             ###################################### 
             # data2vec step - friendly step
@@ -195,7 +211,7 @@ def adv_pretrain(config_kwt, config_d2v, k, alpha):
             model_d2v.load_state_dict(kwt_partial_state_dict, strict=False)
             
             # train single batch
-            loss_d2v, target_var_d2v, prediction_var_d2v = data2vec.data2vec_utils.trainer.train_single_batch(model_d2v, data, mask, optimizer_d2v, criterion_d2v, device)
+            loss_d2v, target_var_d2v, prediction_var_d2v = data2vec.data2vec_utils.trainer.train_single_batch(model_d2v, dataf, mask, optimizer_d2v, criterion_d2v, device)
             model_d2v.ema_step()
             running_loss_d2v += loss_d2v
             running_target_var_d2v += target_var_d2v
@@ -223,7 +239,7 @@ def adv_pretrain(config_kwt, config_d2v, k, alpha):
             model_kwt.load_state_dict(d2v_partial_state_dict, strict=False)
             
             # train single batch 
-            loss_kwt, corr_kwt = utils.trainer.train_single_batch(model_kwt, data, targets, optimizer_kwt, criterion_kwt, device)
+            loss_kwt, corr_kwt = utils.trainer.train_single_batch(model_kwt, dataa, targetsa, optimizer_kwt, criterion_kwt, device)
             running_loss_kwt += loss_kwt
             correct_kwt += corr_kwt
             
@@ -246,12 +262,12 @@ def adv_pretrain(config_kwt, config_d2v, k, alpha):
         log_dict = {"epoch": epoch, "time_per_epoch": time.time() - t0,
                     "avg_train_target_var": running_target_var_d2v / n_batches,
                     "avg_train_prediction_var": running_prediction_var_d2v / n_batches,
-                    "avg_loss_per_ep": running_loss_d2v / len(trainloader.dataset)}
+                    "avg_loss_per_ep": running_loss_d2v / len(trainloaderf.dataset)}
         log(log_dict, step, config_d2v)    
         
         if not epoch % config_d2v["exp"]["val_freq"]:
             avg_val_loss, avg_val_target_var, avg_val_prediction_var = data2vec.data2vec_utils.trainer.evaluate(model_d2v, mask_generator, criterion_d2v,
-                                                                                valloader, device)
+                                                                                valloaderf, device)
             log_dict = {"epoch": epoch, "val_loss": avg_val_loss,
                         "avg_val_target_var": avg_val_target_var, "avg_val_prediction_var": avg_val_prediction_var}
             #log(log_dict, step, config_d2v)
@@ -265,11 +281,11 @@ def adv_pretrain(config_kwt, config_d2v, k, alpha):
                 save_model(epoch, avg_val_loss, save_path, model_d2v.encoder, optimizer_d2v, log_file)
                 
         # kwt log, validation and save model
-        log_dict = {"epoch": epoch, "time_per_epoch": time.time() - t0, "train_acc": correct_kwt/(len(trainloader.dataset)), "avg_loss_per_ep": running_loss_kwt/len(trainloader)}
+        log_dict = {"epoch": epoch, "time_per_epoch": time.time() - t0, "train_acc": correct_kwt/(len(trainloadera.dataset)), "avg_loss_per_ep": running_loss_kwt/len(trainloaderf)}
         log(log_dict, step, config_kwt)
         
         if not epoch % config_kwt["exp"]["val_freq"]:
-            val_acc, avg_val_loss = utils.trainer.evaluate(model_kwt, criterion_kwt, valloader, device)
+            val_acc, avg_val_loss = utils.trainer.evaluate(model_kwt, criterion_kwt, valloadera, device)
             log_dict = {"epoch": epoch, "val_loss": avg_val_loss, "val_acc": val_acc}
             log(log_dict, step, config_kwt)
             
@@ -283,7 +299,7 @@ def adv_pretrain(config_kwt, config_d2v, k, alpha):
     # training complete
     
     # data2vec evaluation 
-    avg_val_loss, avg_val_target_var, avg_val_prediction_var = data2vec.data2vec_utils.trainer.evaluate(model_d2v, mask_generator, criterion_d2v, valloader,
+    avg_val_loss, avg_val_target_var, avg_val_prediction_var = data2vec.data2vec_utils.trainer.evaluate(model_d2v, mask_generator, criterion_d2v, valloaderf,
                                                                         device)
     log_dict = {"epoch": epoch, "val_loss": avg_val_loss,
                 "avg_val_target_var": avg_val_target_var, "avg_val_prediction_var": avg_val_prediction_var}
@@ -298,7 +314,7 @@ def adv_pretrain(config_kwt, config_d2v, k, alpha):
     
     # kwt evaluation
     
-    val_acc, avg_val_loss = evaluate(model_kwt, criterion_kwt, valloader, device)
+    val_acc, avg_val_loss = evaluate(model_kwt, criterion_kwt, valloadera, device)
     log_dict = {"epoch": epoch, "val_loss": avg_val_loss, "val_acc": val_acc}
     log(log_dict, step, config_kwt)
 
